@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Smart Grid Control Platform</title>
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0f172a; color: #e2e8f0; }
+      h1 { padding: 20px 24px; font-size: 1.5rem; font-weight: 600; border-bottom: 1px solid #1e293b; }
+      .dashboard { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; padding: 20px; }
+      .card { background: #1e293b; border-radius: 12px; padding: 16px; border: 1px solid #334155; }
+      .card h3 { font-size: 0.85rem; color: #94a3b8; margin-bottom: 12px; text-transform: uppercase; letter-spacing: 0.05em; }
+      .full-width { grid-column: 1 / -1; }
+      .status-row { display: flex; gap: 24px; flex-wrap: wrap; }
+      .status-item { display: flex; flex-direction: column; align-items: center; padding: 12px 24px; background: #0f172a; border-radius: 8px; min-width: 120px; }
+      .status-item .label { font-size: 0.75rem; color: #64748b; }
+      .status-item .value { font-size: 1.5rem; font-weight: 700; margin-top: 4px; }
+      .status-item .unit { font-size: 0.75rem; color: #64748b; }
+      .green { color: #22c55e; }
+      .yellow { color: #eab308; }
+      .red { color: #ef4444; }
+      .market-list { list-style: none; }
+      .market-list li { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #334155; font-size: 0.9rem; }
+      .market-list li:last-child { border: none; }
+      .buy { color: #22c55e; }
+      .sell { color: #ef4444; }
+    </style>
+  </head>
+  <body>
+    <h1>⚡ Smart Grid Control Platform</h1>
+    <div id="root" class="dashboard"></div>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+    <script type="text/babel">
+      const { useState, useEffect, useRef } = React;
+
+      function StatusCard({ label, value, unit, color }) {
+        return React.createElement('div', { className: 'status-item' },
+          React.createElement('span', { className: 'label' }, label),
+          React.createElement('span', { className: `value ${color || ''}` }, value),
+          React.createElement('span', { className: 'unit' }, unit)
+        );
+      }
+
+      function LiveGrid({ data }) {
+        if (!data) return React.createElement('div', { className: 'card full-width' }, 'Waiting for data...');
+        const freqColor = data.frequency_hz < 49.8 || data.frequency_hz > 50.2 ? 'red' : data.frequency_hz < 49.9 || data.frequency_hz > 50.1 ? 'yellow' : 'green';
+        const voltColor = data.voltage_v < 225 || data.voltage_v > 235 ? 'red' : data.voltage_v < 228 || data.voltage_v > 232 ? 'yellow' : 'green';
+        return React.createElement('div', { className: 'card full-width' },
+          React.createElement('h3', null, 'Live Grid Status'),
+          React.createElement('div', { className: 'status-row' },
+            React.createElement(StatusCard, { label: 'Frequency', value: data.frequency_hz, unit: 'Hz', color: freqColor }),
+            React.createElement(StatusCard, { label: 'Voltage', value: data.voltage_v, unit: 'V', color: voltColor }),
+            React.createElement(StatusCard, { label: 'Demand', value: data.demand_kw, unit: 'kW', color: 'green' }),
+            React.createElement(StatusCard, { label: 'Solar', value: data.solar_generation_kw, unit: 'kW', color: 'yellow' }),
+            React.createElement(StatusCard, { label: 'Wind', value: data.wind_generation_kw, unit: 'kW', color: 'green' }),
+            React.createElement(StatusCard, { label: 'Battery SOC', value: data.battery?.state_of_charge, unit: '%', color: 'green' })
+          )
+        );
+      }
+
+      function LoadGeneration({ history }) {
+        const ref = useRef(null);
+        useEffect(() => {
+          if (history.length < 2) return;
+          const trace1 = { x: history.map(d => d.timestamp), y: history.map(d => d.demand_kw), type: 'bar', name: 'Load (kW)', marker: { color: '#3b82f6' } };
+          const trace2 = { x: history.map(d => d.timestamp), y: history.map(d => d.solar_generation_kw + d.wind_generation_kw), type: 'bar', name: 'Renewable (kW)', marker: { color: '#22c55e' } };
+          Plotly.newPlot(ref.current, [trace1, trace2], {
+            title: 'Load vs Generation', paper_bgcolor: '#1e293b', plot_bgcolor: '#1e293b',
+            font: { color: '#e2e8f0' }, margin: { t: 40, b: 40, l: 60, r: 20 },
+            barmode: 'group', xaxis: { tickfont: { size: 10 } }
+          }, { responsive: true, displayModeBar: false });
+        }, [history]);
+        return React.createElement('div', { className: 'card' }, React.createElement('h3', null, 'Load vs Generation'), React.createElement('div', { ref, style: { height: 300 } }));
+      }
+
+      function MarketPriceChart({ history }) {
+        const ref = useRef(null);
+        useEffect(() => {
+          if (history.length < 2) return;
+          const trace = { x: history.map(d => d.timestamp), y: history.map(d => d.market_price || 0), type: 'scatter', mode: 'lines+markers', name: 'Price ($/MWh)', line: { color: '#f59e0b', width: 2 } };
+          Plotly.newPlot(ref.current, [trace], {
+            title: 'Market Price Trend', paper_bgcolor: '#1e293b', plot_bgcolor: '#1e293b',
+            font: { color: '#e2e8f0' }, margin: { t: 40, b: 40, l: 60, r: 20 },
+            xaxis: { tickfont: { size: 10 } }
+          }, { responsive: true, displayModeBar: false });
+        }, [history]);
+        return React.createElement('div', { className: 'card' }, React.createElement('h3', null, 'Market Price Trend'), React.createElement('div', { ref, style: { height: 300 } }));
+      }
+
+      function BatteryGauge({ data }) {
+        if (!data?.battery) return React.createElement('div', { className: 'card' }, 'No battery data');
+        const soc = data.battery.state_of_charge;
+        const color = soc > 80 ? '#22c55e' : soc > 30 ? '#eab308' : '#ef4444';
+        return React.createElement('div', { className: 'card' },
+          React.createElement('h3', null, 'Battery State of Charge'),
+          React.createElement('div', { style: { textAlign: 'center', padding: '20px 0' } },
+            React.createElement('div', { style: { position: 'relative', width: 160, height: 160, margin: '0 auto' } },
+              React.createElement('div', { style: { width: '100%', height: '100%', borderRadius: '50%', border: '8px solid #334155', position: 'relative', overflow: 'hidden' } },
+                React.createElement('div', { style: { position: 'absolute', bottom: 0, left: 0, width: '100%', height: `${soc}%`, background: color, transition: 'height 0.5s ease', borderRadius: '0 0 50% 50%' } })
+              ),
+              React.createElement('div', { style: { position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', fontSize: '2rem', fontWeight: 700 } }, `${soc}%`)
+            ),
+            React.createElement('div', { style: { marginTop: 8, fontSize: '0.85rem', color: '#94a3b8' } },
+              `Charge: ${data.battery.charge_rate_kw} kW | Discharge: ${data.battery.discharge_rate_kw} kW`
+            )
+          )
+        );
+      }
+
+      function MarketDecisions({ decisions }) {
+        if (!decisions || decisions.length === 0) return React.createElement('div', { className: 'card' }, 'No market decisions');
+        return React.createElement('div', { className: 'card' },
+          React.createElement('h3', null, 'Top 3 Market Decisions'),
+          React.createElement('ul', { className: 'market-list' },
+            decisions.slice(0, 3).map((d, i) =>
+              React.createElement('li', { key: i },
+                React.createElement('span', null, `Hour ${d.hour}`),
+                React.createElement('span', { className: d.action === 'buy' ? 'buy' : 'sell' },
+                  `${d.action === 'buy' ? 'BUY' : 'SELL'} ${Math.abs(d.market_trade_mw).toFixed(1)} MW @ $${d.market_price.toFixed(2)}`
+                )
+              )
+            )
+          )
+        );
+      }
+
+      function App() {
+        const [data, setData] = useState(null);
+        const [history, setHistory] = useState([]);
+        const [decisions, setDecisions] = useState([]);
+        const wsRef = useRef(null);
+
+        useEffect(() => {
+          function connect() {
+            const ws = new WebSocket('ws://localhost:8000/ws');
+            ws.onmessage = (event) => {
+              const msg = JSON.parse(event.data);
+              if (msg.type === 'telemetry') {
+                setData(msg.data);
+                setHistory(prev => [...prev.slice(-59), { ...msg.data, timestamp: new Date().toLocaleTimeString() }]);
+              } else if (msg.type === 'market_update') {
+                setDecisions(msg.schedule || []);
+              }
+            };
+            ws.onclose = () => setTimeout(connect, 3000);
+            wsRef.current = ws;
+          }
+          connect();
+          return () => wsRef.current?.close();
+        }, []);
+
+        return React.createElement(React.Fragment, null,
+          React.createElement(LiveGrid, { data }),
+          React.createElement(LoadGeneration, { history }),
+          React.createElement(MarketPriceChart, { history }),
+          React.createElement(BatteryGauge, { data }),
+          React.createElement(MarketDecisions, { decisions })
+        );
+      }
+
+      ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
+    </script>
+  </body>
+</html>
